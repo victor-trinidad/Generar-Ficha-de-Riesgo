@@ -1,7 +1,10 @@
 import pandas as pd
 from docx import Document
-from docx.shared import Inches, Pt, Cm # Importar Cm para A4
+from docx.shared import Inches, Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+# Importaciones necesarias para configurar márgenes de celda
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn 
 import streamlit as st
 import io 
 import os 
@@ -21,7 +24,48 @@ COLUMNAS_MAP = [
     'Acciones', 'Fecha_Identificacion', 'Ultima_Revision'
 ]
 
-# --- FUNCIONES AUXILIARES DE GENERACIÓN ---
+# --- FUNCIÓN PARA ESTABLECER MÁRGENES DE CELDA ---
+
+def set_cell_margins(cell, top=0, bottom=0, start=0, end=0):
+    """Establece los márgenes internos de una celda en Word (en CM)."""
+    # Convertir Cm a Dxa (twentieths of a point, 1 cm = 567 Dxa)
+    twips_per_cm = 567
+    
+    # Crear el elemento XML tcMar (table cell margin)
+    tcPr = cell._element.tcPr
+    if tcPr is None:
+        tcPr = OxmlElement('w:tcPr')
+        cell._element.tcPr = tcPr
+
+    # Elementos para cada margen
+    margin_elements = {
+        'w:top': top * twips_per_cm,
+        'w:bottom': bottom * twips_per_cm,
+        'w:left': start * twips_per_cm, # En Word se llama 'Izquierda'
+        'w:right': end * twips_per_cm  # En Word se llama 'Derecha'
+    }
+    
+    for tag, value in margin_elements.items():
+        # Crear o actualizar el elemento de margen
+        if value > 0:
+            tcMar = OxmlElement('w:tcMar')
+            mar_type = OxmlElement(tag)
+            mar_type.set(qn('w:w'), str(int(value)))
+            mar_type.set(qn('w:type'), 'dxa') # Indica que la unidad es Dxa
+            tcMar.append(mar_type)
+            # Asegurar que se inserte en el lugar correcto
+            tcPr.append(tcMar)
+        # Nota: python-docx a veces puede tener conflictos si se intenta eliminar un margen existente. 
+        # Si el valor es 0, no lo creamos.
+
+def apply_table_cell_margins(table):
+    """Aplica los márgenes internos de celda solicitados (0,00 Superior/Inferior, 0,05 Izquierda/Derecha) a todas las celdas de una tabla."""
+    # Los márgenes solicitados son: 0.00 cm Superior/Inferior, 0.05 cm Izquierda/Derecha
+    for row in table.rows:
+        for cell in row.cells:
+            # Utilizamos 0.00 cm para superior/inferior, y 0.05 cm para izquierda/derecha
+            set_cell_margins(cell, top=0.00, bottom=0.00, start=0.05, end=0.05)
+
 
 def agregar_seccion_tabla(document, titulo, datos_dict):
     """Agrega una sección formal usando una tabla de dos columnas (Título del Campo | Valor del Campo)."""
@@ -30,6 +74,9 @@ def agregar_seccion_tabla(document, titulo, datos_dict):
     # Crear una tabla de 2 columnas
     tabla = document.add_table(rows=len(datos_dict), cols=2)
     tabla.style = 'Table Grid'
+    
+    # *** APLICAR MÁRGENES DE TABLA ***
+    apply_table_cell_margins(tabla)
     
     # Establecer ancho para el título (Columna 0)
     tabla.columns[0].width = Inches(2)
@@ -86,6 +133,9 @@ def generar_ficha_docx(datos_riesgo):
     # Usaremos una tabla de 4 filas x 4 columnas para replicar el formato
     header_table = document.add_table(4, 4)
     header_table.style = 'Table Grid'
+    
+    # *** APLICAR MÁRGENES DE TABLA ***
+    apply_table_cell_margins(header_table)
     
     # Anchos de Columna (Usando Cm para exactitud)
     header_table.columns[0].width = Cm(4.3) 
@@ -219,6 +269,7 @@ def generar_ficha_docx(datos_riesgo):
         'Origen / Área Responsable': datos_riesgo['Origen_Area'],
         'Proceso o Documento': datos_riesgo['Proceso_Documento']
     }
+    # La llamada a agregar_seccion_tabla ya aplica los márgenes
     agregar_seccion_tabla(document, '1) IDENTIFICACIÓN DEL RIESGO', identificacion_data)
 
     # 2) - ANÁLISIS DEL RIESGO
@@ -226,6 +277,7 @@ def generar_ficha_docx(datos_riesgo):
         'Impacto Potencial': datos_riesgo['Impacto_Potencial'],
         'Efecto (Consecuencias)': datos_riesgo['Efecto']
     }
+    # La llamada a agregar_seccion_tabla ya aplica los márgenes
     agregar_seccion_tabla(document, '2) ANÁLISIS DEL RIESGO', analisis_data)
 
     # 3) - EVALUACIÓN DEL RIESGO
@@ -234,6 +286,9 @@ def generar_ficha_docx(datos_riesgo):
     # Tabla específica para la evaluación PxG
     tabla_evaluacion = document.add_table(rows=2, cols=4)
     tabla_evaluacion.style = 'Table Grid'
+    
+    # *** APLICAR MÁRGENES DE TABLA ***
+    apply_table_cell_margins(tabla_evaluacion)
     
     # Encabezados
     hdr_cells = tabla_evaluacion.rows[0].cells
@@ -262,6 +317,7 @@ def generar_ficha_docx(datos_riesgo):
         'Tipo de Control': datos_riesgo['Tipo_Control'],
         'Eficacia del Seguimiento': datos_riesgo['Eficacia_Seguimiento']
     }
+    # La llamada a agregar_seccion_tabla ya aplica los márgenes
     agregar_seccion_tabla(document, '4) SEGUIMIENTO DEL RIESGO', seguimiento_data)
     
     document.add_heading('Descripción del Control Existente', level=3)
@@ -272,6 +328,10 @@ def generar_ficha_docx(datos_riesgo):
     
     tabla_versiones = document.add_table(rows=1, cols=3)
     tabla_versiones.style = 'Table Grid'
+    
+    # *** APLICAR MÁRGENES DE TABLA ***
+    apply_table_cell_margins(tabla_versiones)
+
     vers_cells = tabla_versiones.rows[0].cells
     
     run_vers = vers_cells[0].paragraphs[0].add_run(f'Versión: {datos_riesgo["Version"]}')
@@ -332,40 +392,4 @@ df_riesgos = cargar_datos(ARCHIVO_EXCEL, NOMBRE_HOJA, FILA_ENCABEZADOS, COLUMNAS
 if not df_riesgos.empty:
     
     # Usamos st.text_input para pedir el número de riesgo
-    num_riesgo_ingresado = st.sidebar.text_input(
-        "Ingresa el Número de Riesgo (ej: R-01)",
-        key="riesgo_input"
-    ).strip() 
-
-    if num_riesgo_ingresado:
-        # BÚSQUEDA: Buscar el riesgo en el DataFrame por el número ingresado
-        registro_riesgo_encontrado = df_riesgos[df_riesgos['Num_Riesgo'] == num_riesgo_ingresado]
-        
-        if not registro_riesgo_encontrado.empty:
-            
-            registro_riesgo = registro_riesgo_encontrado.iloc[0]
-            
-            st.header(f"Ficha Seleccionada: {registro_riesgo['Riesgo_Identificado']}")
-            
-            # Botón de Generación y Descarga
-            with st.spinner("Generando ficha..."):
-                ficha_docx = generar_ficha_docx(registro_riesgo)
-                
-                st.download_button(
-                    label="📥 Descargar Ficha de Riesgo (DOCX)",
-                    data=ficha_docx,
-                    file_name=f"Ficha_Riesgo_{registro_riesgo['Num_Riesgo']}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-                
-                st.info("Presiona el botón de descarga para obtener el documento A4 generado.")
-                
-        else:
-            # Si no encuentra el número de riesgo
-            st.warning(f"⚠️ El número de riesgo '{num_riesgo_ingresado}' no fue encontrado en la matriz. Por favor, verifica el número.")
-    
-    else:
-        st.info("Esperando la entrada del Número de Riesgo...")
-
-else:
-    st.error("No se pudieron cargar los datos. Verifica que el archivo Excel sea correcto.")
+    num_riesgo_ing
