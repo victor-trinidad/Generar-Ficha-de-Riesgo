@@ -1,6 +1,6 @@
 import pandas as pd
 from docx import Document
-from docx.shared import Inches, Pt, Cm
+from docx.shared import Inches, Pt, Cm # Importar Cm para A4
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import streamlit as st
 import io 
@@ -56,17 +56,21 @@ def generar_ficha_docx(datos_riesgo):
     document = Document()
     
     # --------------------------------------------------------
-    # 1. AJUSTE DE ESTILOS BASE Y PÁGINA (A4)
+    # 1. AJUSTE DE ESTILOS BASE, TAMAÑO DE PÁGINA (A4) Y MÁRGENES
     # --------------------------------------------------------
     section = document.sections[0]
     
-    # Márgenes de Disposición (Superior 2,5 cm, inferior 2,5 cm, izquierdo: 2cm, derecho: 2 cm)
+    # Tamaño A4 (210 x 297mm)
+    section.page_width = Cm(21.0)
+    section.page_height = Cm(29.7)
+    
+    # Márgenes de Disposición
     section.top_margin = Cm(2.5)
     section.bottom_margin = Cm(2.5)
     section.left_margin = Cm(2.0)
     section.right_margin = Cm(2.0)
 
-    # Posición de Encabezado/Pie (Encabezado 0,5 cm, Pie 0,6 cm)
+    # Posición de Encabezado/Pie
     section.header_distance = Cm(0.5)
     section.footer_distance = Cm(0.6)
 
@@ -76,55 +80,100 @@ def generar_ficha_docx(datos_riesgo):
     style.font.size = Pt(10)
     
     # --------------------------------------------------------
-    # 2. ENCABEZADO (SOLUCIÓN FINAL: USAMOS SOLO PÁRRAFOS Y TABULACIONES)
+    # 2. ENCABEZADO (TABLA COMPLEJA: MOVIDA AL CUERPO DEL DOCUMENTO)
     # --------------------------------------------------------
-    header = section.header
     
-    # Párrafo 1: Logo (Alineado a la izquierda)
-    p_logo = header.paragraphs[0]
-    p_logo.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    # Usaremos una tabla de 4 filas x 4 columnas para replicar el formato
+    header_table = document.add_table(4, 4)
+    header_table.style = 'Table Grid'
+    
+    # Anchos de Columna (Usando Cm para exactitud)
+    header_table.columns[0].width = Cm(4.3) 
+    header_table.columns[1].width = Cm(8.18) 
+    header_table.columns[2].width = Cm(1.8) 
+    header_table.columns[3].width = Cm(2.7) 
+
+    # Alto de Fila (Todas a 0.5 cm, el total suma 2.0 cm)
+    for row in header_table.rows:
+        row.height = Cm(0.5)
+
+    # ------------------------------------------------------------------
+    # A. MERGE Y CONTENIDO: Columna 1 (Logo) - Fusiones R0 a R3
+    # ------------------------------------------------------------------
+    a1 = header_table.cell(0, 0)
+    d1 = header_table.cell(3, 0)
+    a1.merge(d1)
+    
+    p_logo = a1.paragraphs[0]
+    p_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
     try:
-        # Se necesita un logo de un tamaño razonable para que quepa en el encabezado
+        # Ajustar tamaño del logo para que quepa en 4.3cm
         p_logo.add_run().add_picture('logo.png', width=Cm(3.0)) 
     except FileNotFoundError:
         p_logo.add_run("Lqf").bold = True
         
-    # Párrafo 2: Título principal (Alineado al centro)
-    p_header_title = header.add_paragraph()
-    p_header_title.add_run('LISTADO MAESTRO O MATRIZ').bold = True
-    p_header_title.add_run('\tMATRIZ INSTITUCIONAL DE GESTIÓN DE RIESGOS') # Usamos tabulación para separar
-    p_header_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_header_title.style.font.size = Pt(10)
-    p_header_title.style.font.name = 'Arial'
-
-    # Párrafos 3, 4, 5, 6: Simulación de Tabla de Control (Alineado a la derecha, pequeño)
+    # ------------------------------------------------------------------
+    # B. MERGE Y CONTENIDO: Columna 2 (Título/Info) 
+    # ------------------------------------------------------------------
+    
+    # R0 + R1 (Título Principal LISTADO MAESTRO O MATRIZ)
+    b1 = header_table.cell(0, 1)
+    b2 = header_table.cell(1, 1)
+    b1.merge(b2)
+    p_title_top = b1.paragraphs[0]
+    p_title_top.add_run('LISTADO MAESTRO O MATRIZ').bold = True
+    p_title_top.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_title_top.style.font.size = Pt(10)
+    p_title_top.style.font.name = 'Arial'
+    
+    # R2 + R3 (Título Secundario)
+    b3 = header_table.cell(2, 1)
+    b4 = header_table.cell(3, 1)
+    b3.merge(b4)
+    p_title_bottom = b3.paragraphs[0]
+    p_title_bottom.add_run("MATRIZ INSTITUCIONAL DE GESTIÓN DE RIESGOS")
+    p_title_bottom.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_title_bottom.style.font.size = Pt(9)
+    p_title_bottom.style.font.name = 'Arial'
+    
+    # ------------------------------------------------------------------
+    # C/D. CONTENIDO: Columnas 3 y 4 (Datos de Control)
+    # ------------------------------------------------------------------
     control_data = [
         ("Código:", "LMM_ORG_05"), 
         ("Rev.:", "00"),
         ("Vigencia:", "00/00/2025"),
         ("Página:", "1-1")
     ]
-    
-    for key, value in control_data:
-        p = header.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    for i, (key, value) in enumerate(control_data):
+        c_cell = header_table.cell(i, 2)
+        d_cell = header_table.cell(i, 3)
         
-        run_key = p.add_run(f'{key}')
+        # Columna 3 (Etiqueta)
+        p_key = c_cell.paragraphs[0]
+        run_key = p_key.add_run(key)
         run_key.bold = True
         run_key.font.size = Pt(8) 
         run_key.font.name = 'Arial'
+        p_key.alignment = WD_ALIGN_PARAGRAPH.LEFT
         
-        run_value = p.add_run(f' {value}') 
-        run_value.font.size = Pt(8) 
+        # Columna 4 (Valor)
+        p_value = d_cell.paragraphs[0]
+        run_value = p_value.add_run(value)
+        run_value.font.size = Pt(8)
         run_value.font.name = 'Arial'
-
+        p_value.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    
     # --------------------------------------------------------
     # 3. PIE DE PÁGINA (AVISO DE CONFIDENCIALIDAD EXACTO)
     # --------------------------------------------------------
     footer = section.footer
-    footer.paragraphs[0].clear() # Limpiar el párrafo predeterminado
-    
-    # Línea 1 (Usamos dos párrafos para forzar el salto de línea y el centrado de cada línea)
+    # Limpiamos todos los párrafos preexistentes
+    for p in footer.paragraphs:
+        p.clear() 
+
+    # Línea 1
     p_line1 = footer.paragraphs[0] if len(footer.paragraphs) > 0 else footer.add_paragraph()
     p_line1.clear()
     run1 = p_line1.add_run("Este documento contiene información de propiedad exclusiva de La Química Farmacéutica S.A. Queda prohibida la difusión")
@@ -142,10 +191,10 @@ def generar_ficha_docx(datos_riesgo):
     p_line2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # --------------------------------------------------------
-    # 4. CUERPO DEL DOCUMENTO (Se mantiene igual, respetando Arial)
+    # 4. CUERPO DEL DOCUMENTO (Continuación)
     # --------------------------------------------------------
 
-    # Título de la Compañía y Ficha
+    # Título de la Compañía y Ficha (Justo debajo de la tabla del "Encabezado")
     p_id = document.add_paragraph()
     run_lqf = p_id.add_run('Lqf La química farmacéutica')
     run_lqf.bold = True
