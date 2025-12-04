@@ -2,8 +2,10 @@ import pandas as pd
 from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_HEADER_FOOTER
 import streamlit as st
 import io 
+import os 
 
 # --- CONFIGURACIÓN ESPECÍFICA DEL ARCHIVO ---
 ARCHIVO_EXCEL = 'LMM_ORG_04 Rev. 00 - Matriz Institucional de Gestión de Riesgos.xlsx'
@@ -25,46 +27,113 @@ COLUMNAS_MAP = [
 def agregar_seccion_tabla(document, titulo, datos_dict):
     """Agrega una sección formal usando una tabla de dos columnas (Título del Campo | Valor del Campo)."""
     document.add_heading(titulo, level=2)
-    
-    # Crear una tabla de 2 columnas
     tabla = document.add_table(rows=len(datos_dict), cols=2)
     tabla.style = 'Table Grid'
-    
-    # Establecer ancho para el título (Columna 0)
     tabla.columns[0].width = Inches(2)
     
     i = 0
     for key, value in datos_dict.items():
         row_cells = tabla.rows[i].cells
-        
-        # Título del Campo (negrita)
         row_cells[0].paragraphs[0].add_run(f'{key}').bold = True
-        
-        # Valor del Campo (texto normal)
         row_cells[1].paragraphs[0].add_run(str(value))
         i += 1
     document.add_paragraph()
 
 def generar_ficha_docx(datos_riesgo):
     """
-    Genera la ficha A4 y devuelve el documento como un objeto BytesIO 
-    para poder ser descargado en Streamlit.
+    Genera la ficha A4 con la estructura de Encabezado y Pie de Página del formato corporativo.
     """
     document = Document()
     
-    # --- Configuración Estilística A4 ---
+    # --------------------------------------------------------
+    # 1. AJUSTE DE ESTILOS BASE Y PÁGINA (A4)
+    # --------------------------------------------------------
     section = document.sections[0]
+    # Configurar márgenes estrechos
     section.top_margin, section.bottom_margin = Inches(0.5), Inches(0.5)
     section.left_margin, section.right_margin = Inches(0.75), Inches(0.75)
-    
-    # --- TÍTULO PRINCIPAL DE LA FICHA ---
-    document.add_heading(f'FICHA DE GESTIÓN DE RIESGO N° {datos_riesgo["Num_Riesgo"]}', level=0)
-    document.add_paragraph(f'Versión: {datos_riesgo["Version"]} | Última Revisión: {datos_riesgo["Ultima_Revision"]}')
-    document.add_paragraph('---') 
 
-    # ------------------------------------------------------------------
+    # Establecer estilo de fuente base (Arial 10pt)
+    style = document.styles['Normal']
+    style.font.name = 'Arial'
+    style.font.size = Pt(10)
+    
+    # --------------------------------------------------------
+    # 2. ENCABEZADO (REPLICANDO ESTRUCTURA DEL PDF)
+    # --------------------------------------------------------
+    header = section.header
+    
+    # Tabla principal del encabezado (3 columnas: Logo, Título/Control, Espacio)
+    header_table = header.add_table(1, 3)
+    header_table.style = 'Table Grid' # Usar bordes para replicar el cuadro de control
+    header_table.columns[0].width = Inches(1.5)
+    header_table.columns[2].width = Inches(2.0)
+    
+    # Columna 1: Logo Lqf
+    logo_cell = header_table.rows[0].cells[0]
+    p_logo = logo_cell.paragraphs[0]
+    p_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    try:
+        # Asegúrate de que 'logo.png' esté en tu repositorio
+        p_logo.add_run().add_picture('logo.png', width=Inches(0.7)) 
+    except FileNotFoundError:
+        p_logo.add_run("Lqf").bold = True
+
+    # Columna 2: LISTADO MAESTRO O MATRIZ
+    title_cell = header_table.rows[0].cells[1]
+    title_cell.paragraphs[0].add_run('LISTADO MAESTRO O MATRIZ').bold = True
+    title_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Columna 3: Tabla de Control de Documento
+    control_data = [
+        ("Código:", "LMM_ORG_05"), 
+        ("Rev.:", "00"),
+        ("Vigencia:", "00/00/2025"),
+        ("Página:", "1-1") # Nota: Mantendremos 1-1, ya que la numeración dinámica es compleja
+    ]
+    
+    # Usamos saltos de línea y tabulaciones para simular el formato de la tabla de control
+    control_cell = header_table.rows[0].cells[2]
+    control_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+    for key, value in control_data:
+        p = control_cell.add_paragraph()
+        p.style.font.size = Pt(8) # Fuente pequeña para la tabla de control
+        p.add_run(f'{key}').bold = True
+        p.add_run(f'\t{value}') # Usamos tabulación para separar clave y valor
+
+    # --------------------------------------------------------
+    # 3. PIE DE PÁGINA (AVISO DE CONFIDENCIALIDAD)
+    # --------------------------------------------------------
+    footer = section.footer
+    footer_paragraph = footer.paragraphs[0]
+    
+    footer_text = (
+        "Este documento contiene información de propiedad exclusiva de La Química Farmacéutica S.A. [cite: 6] Queda prohibida la difusión y/o cesión a terceros sin autorización previa del área de Auditoría Interna y O&M. [cite: 7] Toda copia no controlada carece de validez. [cite: 8]"
+    )
+    
+    run = footer_paragraph.add_run(footer_text)
+    run.font.size = Pt(7) # Fuente más pequeña para el pie de página
+    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # --------------------------------------------------------
+    # 4. CUERPO DEL DOCUMENTO
+    # --------------------------------------------------------
+
+    # Título de la Compañía y Ficha
+    p_id = document.add_paragraph()
+    p_id.add_run('Lqf La química farmacéutica').bold = True
+    p_id.add_run('\nFICHA DE RIESGO').bold = True
+    p_id.style.font.size = Pt(14)
+    document.add_paragraph('-' * 80) # Separador visual
+
+    # TÍTULO PRINCIPAL DE LA FICHA
+    titulo_doc = document.add_heading(f'Identificación de Riesgo N° {datos_riesgo["Num_Riesgo"]}', level=0)
+    titulo_doc.style.font.size = Pt(16)
+    
+    document.add_paragraph(f'Versión: {datos_riesgo["Version"]} | Última Revisión: {datos_riesgo["Ultima_Revision"]}').style.font.size = Pt(9)
+    document.add_paragraph() 
+
     # 1) - IDENTIFICACIÓN DEL RIESGO
-    # ------------------------------------------------------------------
     identificacion_data = {
         'Riesgo Identificado': datos_riesgo['Riesgo_Identificado'],
         'Entorno de Control': datos_riesgo['Entorno_Control'],
@@ -73,18 +142,14 @@ def generar_ficha_docx(datos_riesgo):
     }
     agregar_seccion_tabla(document, '1) IDENTIFICACIÓN DEL RIESGO', identificacion_data)
 
-    # ------------------------------------------------------------------
     # 2) - ANÁLISIS DEL RIESGO
-    # ------------------------------------------------------------------
     analisis_data = {
         'Impacto Potencial': datos_riesgo['Impacto_Potencial'],
         'Efecto (Consecuencias)': datos_riesgo['Efecto']
     }
     agregar_seccion_tabla(document, '2) ANÁLISIS DEL RIESGO', analisis_data)
 
-    # ------------------------------------------------------------------
     # 3) - EVALUACIÓN DEL RIESGO
-    # ------------------------------------------------------------------
     document.add_heading('3) EVALUACIÓN DEL RIESGO', level=2)
     
     # Tabla específica para la evaluación PxG
@@ -107,9 +172,7 @@ def generar_ficha_docx(datos_riesgo):
     val_cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     document.add_paragraph()
 
-    # ------------------------------------------------------------------
     # 4) - SEGUIMIENTO DEL RIESGO
-    # ------------------------------------------------------------------
     seguimiento_data = {
         'Responsable del Seguimiento': datos_riesgo['Responsable_Seguimiento'],
         'Tipo de Control': datos_riesgo['Tipo_Control'],
@@ -120,9 +183,7 @@ def generar_ficha_docx(datos_riesgo):
     document.add_heading('Descripción del Control Existente', level=3)
     document.add_paragraph(datos_riesgo['Control_Existente'])
 
-    # ------------------------------------------------------------------
     # 5) - SEGUIMIENTO DE VERSIONES Y ACCIONES
-    # ------------------------------------------------------------------
     document.add_heading('5) SEGUIMIENTO DE VERSIONES Y ACCIONES', level=2)
     
     tabla_versiones = document.add_table(rows=1, cols=3)
@@ -167,7 +228,7 @@ def cargar_datos(archivo, hoja, encabezados, columnas):
         return pd.DataFrame()
 
 
-# --- INTERFAZ STREAMLIT PRINCIPAL (MODIFICADA PARA BUSCAR POR TEXTO) ---
+# --- INTERFAZ STREAMLIT PRINCIPAL ---
 st.set_page_config(page_title="Generador de Fichas de Riesgo", layout="wide")
 
 st.title("Generador de Fichas de Riesgo Individuales")
