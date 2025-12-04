@@ -392,4 +392,40 @@ df_riesgos = cargar_datos(ARCHIVO_EXCEL, NOMBRE_HOJA, FILA_ENCABEZADOS, COLUMNAS
 if not df_riesgos.empty:
     
     # Usamos st.text_input para pedir el número de riesgo
-    num_riesgo_ing
+    num_riesgo_ingresado = st.sidebar.text_input(
+        "Ingresa el Número de Riesgo (ej: R-01)",
+        key="riesgo_input"
+    ).strip() 
+
+    if num_riesgo_ingresado:
+        # BÚSQUEDA: Buscar el riesgo en el DataFrame por el número ingresado
+        registro_riesgo_encontrado = df_riesgos[df_riesgos['Num_Riesgo'] == num_riesgo_ingresado]
+        
+        if not registro_riesgo_encontrado.empty:
+            
+            registro_riesgo = registro_riesgo_encontrado.iloc[0]
+            
+            st.header(f"Ficha Seleccionada: {registro_riesgo['Riesgo_Identificado']}")
+            
+            # Botón de Generación y Descarga
+            with st.spinner("Generando ficha..."):
+                ficha_docx = generar_ficha_docx(registro_riesgo)
+                
+                st.download_button(
+                    label="📥 Descargar Ficha de Riesgo (DOCX)",
+                    data=ficha_docx,
+                    file_name=f"Ficha_Riesgo_{registro_riesgo['Num_Riesgo']}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                
+                st.info("Presiona el botón de descarga para obtener el documento A4 generado.")
+                
+        else:
+            # Si no encuentra el número de riesgo
+            st.warning(f"⚠️ El número de riesgo '{num_riesgo_ingresado}' no fue encontrado en la matriz. Por favor, verifica el número.")
+    
+    else:
+        st.info("Esperando la entrada del Número de Riesgo...")
+
+else:
+    st.error("No se pudieron cargar los datos. Verifica que el archivo Excel sea correcto.")
