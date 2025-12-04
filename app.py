@@ -2,7 +2,7 @@ import pandas as pd
 from docx import Document
 from docx.shared import Inches, Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-# Importaciones necesarias para configurar márgenes de celda
+# Importaciones para manipulación de XML para márgenes y anchos
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn 
 import streamlit as st
@@ -24,48 +24,79 @@ COLUMNAS_MAP = [
     'Acciones', 'Fecha_Identificacion', 'Ultima_Revision'
 ]
 
-# --- FUNCIÓN PARA ESTABLECER MÁRGENES DE CELDA ---
+# --- FUNCIONES PARA MANIPULACIÓN DE TABLAS (CORRECCIÓN DE ERRORES) ---
 
 def set_cell_margins(cell, top=0, bottom=0, start=0, end=0):
-    """Establece los márgenes internos de una celda en Word (en CM)."""
-    # Convertir Cm a Dxa (twentieths of a point, 1 cm = 567 Dxa)
-    twips_per_cm = 567
+    """Establece los márgenes internos de una celda en Word (en CM) forzando el XML."""
+    twips_per_cm = 567 # 1 cm = 567 Dxa
     
-    # Crear el elemento XML tcMar (table cell margin)
-    tcPr = cell._element.tcPr
+    # Accede o crea el elemento XML de propiedades de celda
+    tcPr = cell._element.find(qn('w:tcPr'))
     if tcPr is None:
         tcPr = OxmlElement('w:tcPr')
-        cell._element.tcPr = tcPr
+        cell._element.append(tcPr)
 
-    # Elementos para cada margen
-    margin_elements = {
-        'w:top': top * twips_per_cm,
-        'w:bottom': bottom * twips_per_cm,
-        'w:left': start * twips_per_cm, # En Word se llama 'Izquierda'
-        'w:right': end * twips_per_cm  # En Word se llama 'Derecha'
-    }
-    
-    for tag, value in margin_elements.items():
-        # Crear o actualizar el elemento de margen
-        if value > 0:
-            tcMar = OxmlElement('w:tcMar')
-            mar_type = OxmlElement(tag)
-            mar_type.set(qn('w:w'), str(int(value)))
-            mar_type.set(qn('w:type'), 'dxa') # Indica que la unidad es Dxa
-            tcMar.append(mar_type)
-            # Asegurar que se inserte en el lugar correcto
-            tcPr.append(tcMar)
-        # Nota: python-docx a veces puede tener conflictos si se intenta eliminar un margen existente. 
-        # Si el valor es 0, no lo creamos.
+    # Busca o crea el elemento de márgenes de celda
+    tcMar = tcPr.find(qn('w:tcMar'))
+    if tcMar is None:
+        tcMar = OxmlElement('w:tcMar')
+        tcPr.append(tcMar)
+
+    margins = [
+        ('w:top', top * twips_per_cm),
+        ('w:bottom', bottom * twips_per_cm),
+        ('w:left', start * twips_per_cm),
+        ('w:right', end * twips_per_cm)
+    ]
+
+    for tag, value_cm in margins:
+        value_dxa = int(round(value_cm))
+        
+        # Elimina cualquier margen existente con el mismo tag para evitar conflictos
+        existing = tcMar.find(qn(tag))
+        if existing is not None:
+            tcMar.remove(existing)
+
+        # Si el valor es > 0, creamos y añadimos el margen con el tipo 'dxa' (exacto)
+        if value_dxa > 0:
+            mar_element = OxmlElement(tag)
+            mar_element.set(qn('w:w'), str(value_dxa))
+            mar_element.set(qn('w:type'), 'dxa') 
+            tcMar.append(mar_element)
 
 def apply_table_cell_margins(table):
-    """Aplica los márgenes internos de celda solicitados (0,00 Superior/Inferior, 0,05 Izquierda/Derecha) a todas las celdas de una tabla."""
+    """Aplica los márgenes internos de celda solicitados (0,00 Sup/Inf, 0,05 Izq/Der) a todas las celdas de una tabla."""
     # Los márgenes solicitados son: 0.00 cm Superior/Inferior, 0.05 cm Izquierda/Derecha
     for row in table.rows:
         for cell in row.cells:
-            # Utilizamos 0.00 cm para superior/inferior, y 0.05 cm para izquierda/derecha
             set_cell_margins(cell, top=0.00, bottom=0.00, start=0.05, end=0.05)
 
+
+def set_table_width_fixed(table, width_cm):
+    """Fuerza el ancho total de la tabla (en CM) y establece el tipo a exacto para mantener anchos de columna."""
+    twips_per_cm = 567
+    width_dxa = int(round(width_cm * twips_per_cm))
+
+    # Encuentra el elemento de propiedades de tabla (tblPr)
+    tblPr = table._element.find(qn('w:tblPr'))
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        table._element.append(tblPr)
+    
+    # 1. Eliminar cualquier w:tblW existente
+    existing_tblW = tblPr.find(qn('w:tblW'))
+    if existing_tblW is not None:
+        tblPr.remove(existing_tblW)
+        
+    # 2. Crear y configurar w:tblW
+    tblW = OxmlElement('w:tblW')
+    tblW.set(qn('w:w'), str(width_dxa))
+    # w:type="dxa" indica ancho fijo/exacto (necesario para respetar anchos de columna)
+    tblW.set(qn('w:type'), 'dxa') 
+    
+    tblPr.insert(0, tblW) # Insertar al principio para que tenga precedencia
+
+# --- FUNCIONES AUXILIARES DE GENERACIÓN ---
 
 def agregar_seccion_tabla(document, titulo, datos_dict):
     """Agrega una sección formal usando una tabla de dos columnas (Título del Campo | Valor del Campo)."""
@@ -136,6 +167,9 @@ def generar_ficha_docx(datos_riesgo):
     
     # *** APLICAR MÁRGENES DE TABLA ***
     apply_table_cell_margins(header_table)
+
+    # *** FORZAR ANCHO TOTAL DE TABLA (4.3 + 8.18 + 1.8 + 2.7 = 16.98 CM) ***
+    set_table_width_fixed(header_table, 16.98) 
     
     # Anchos de Columna (Usando Cm para exactitud)
     header_table.columns[0].width = Cm(4.3) 
